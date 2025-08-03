@@ -32,28 +32,43 @@ assignment_id = assignment["id"]
 diagram_idx = 0  # first diagram
 
 # ---------------------------------------------------------------------------
-# Copy a sample image into uploads (use repository sample)
+# Copy a sample audio into uploads (use repository sample)
 # ---------------------------------------------------------------------------
-source_audio = Path(__file__).parent.parent.parent / "cactus-eng.m4a"
+source_audio = Path("data/cactus-eng.m4a")
 if not source_audio.exists():
     raise SystemExit("Sample audio preprocessing/cactus.m4a not found.")
 
 dest_name = f"sample_sub_{random.randint(1000,9999)}.m4a"
 shutil.copy2(source_audio, UPLOADS_DIR / dest_name)
 
-# ---------------------------------------------------------------------------
-# Create submission payload
-# ---------------------------------------------------------------------------
 answers = [
     {
         "diagram_idx": diagram_idx,
         "answer_type": "audio",
-        "file_path": f"uploads/{dest_name}",
+        "file_path": f"backend/uploads/{dest_name}",
     }
 ]
 
+# ---------------------------------------------------------------------------
+# Copy a sample image into uploads (use repository sample)
+# ---------------------------------------------------------------------------
+# source_image = Path("backend/preprocessing/braille_clean.png")
+# if not source_image.exists():
+#     raise SystemExit("Sample image preprocessing/braille_clean.png not found.")
+
+# dest_name = f"sample_sub_{random.randint(1000,9999)}.png"
+# shutil.copy2(source_image, UPLOADS_DIR / dest_name)
+
+# answers = [
+#     {
+#         "diagram_idx": diagram_idx,
+#         "answer_type": "image",
+#         "file_path": f"backend/uploads/{dest_name}",
+#     }
+# ]
+
 student_name = "Qasim"
 
-submission_id = insert_submission(assignment_id, student_name, answers)
-print(f"Inserted sample submission #{submission_id} for assignment '{ASSIGNMENT_TITLE}'.")
+# submission_id = insert_submission(assignment_id, student_name, answers)
+# print(f"Inserted sample submission #{submission_id} for assignment '{ASSIGNMENT_TITLE}'.")
 print(all_submissions())

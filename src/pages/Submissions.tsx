@@ -32,7 +32,7 @@ export default function SubmissionsPage() {
       field: 'numDiagrams',
       headerName: '# Diagrams',
       width: 120,
-      valueGetter: (params) => params.row.diagrams?.length ?? 0,
+      valueGetter: (params) => params?.row?.diagrams?.length ?? 0,
     },
   ];
 
@@ -43,7 +43,7 @@ export default function SubmissionsPage() {
       field: 'type',
       headerName: 'Type',
       width: 100,
-      valueGetter: (params) => params.row.answers[0]?.answer_type ?? '',
+      valueGetter: (params) => params?.row?.answers?.[0]?.answer_type ?? '',
     },
   ];
 

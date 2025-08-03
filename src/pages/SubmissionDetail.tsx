@@ -83,7 +83,7 @@ export default function SubmissionDetail() {
   useEffect(() => {
     if (!data) return;
     const answer = data.answers[0];
-    if (answer.english_text) return; // already translated
+    if (answer.english_text || !answer.urdu_text) return; // already translated or no urdu text
 
     setTranslating(true);
     translateUrduToEnglish(answer.urdu_text)
@@ -177,11 +177,11 @@ export default function SubmissionDetail() {
     }
   };
 
-  const highlightedUrdu = answer.urdu_text
+  const highlightedUrdu = (answer.urdu_text || '')
     .replace(/\n/g, ' ')
     .split(' ')
     .map((word, idx) => {
-      const isError = answer.errors.includes(word);
+      const isError = answer.errors?.includes(word) || false;
       return (
         <span key={idx} style={{ textDecoration: isError ? 'underline wavy red' : 'none' }}>
           {word + ' '}
@@ -189,14 +189,21 @@ export default function SubmissionDetail() {
       );
     });
 
+  // Helper function to fix file paths for static serving
+  const getFileUrl = (filePath: string) => {
+    // Remove 'backend/' prefix if present since static files are served from /uploads
+    const cleanPath = filePath.replace(/^backend\//, '');
+    return `${API_BASE_URL}/${cleanPath}`;
+  };
+
   const submissionMedia = answer.answer_type === 'image' ? (
     <img
-      src={`${API_BASE_URL}/${answer.file_path}`}
+      src={getFileUrl(answer.file_path)}
       alt="Student submission"
       style={{ maxWidth: '100%', borderRadius: 8 }}
     />
   ) : (
-    <audio controls src={`${API_BASE_URL}/${answer.file_path}`} style={{ width: '100%' }} />
+    <audio controls src={getFileUrl(answer.file_path)} style={{ width: '100%' }} />
   );
 
   return (
@@ -220,7 +227,7 @@ export default function SubmissionDetail() {
               Original Diagram & Question
             </Typography>
             <img
-              src={`${API_BASE_URL}/${diagram.image_path}`}
+              src={getFileUrl(diagram.image_path)}
               alt="Original diagram"
               style={{ maxWidth: '100%', borderRadius: 8 }}
             />

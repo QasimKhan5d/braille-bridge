@@ -533,7 +533,9 @@ async def get_submission_details(submission_id: int):
         if ans.get("urdu_text"):
             continue
         if ans["answer_type"] == "image":
-            img_path = Path(__file__).parent / ans["file_path"]
+            # Fix file path - remove 'backend/' prefix if present
+            file_path = ans["file_path"].replace("backend/", "", 1)
+            img_path = Path(__file__).parent / file_path
             if not img_path.exists():
                 continue  # can't process
             # Run YOLO OCR
@@ -575,7 +577,9 @@ async def get_submission_details(submission_id: int):
             ans["errors"] = []
             updated_needed = True
         else:  # audio processing
-            audio_path = Path(__file__).parent / ans["file_path"]
+            # Fix file path - remove 'backend/' prefix if present
+            file_path = ans["file_path"].replace("backend/", "", 1)
+            audio_path = Path(__file__).parent / file_path
             if not audio_path.exists():
                 continue
             urdu_text, english_text = await process_audio_with_gemma(str(audio_path))

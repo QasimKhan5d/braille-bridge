@@ -1,6 +1,7 @@
 gemma-3N-finetune/
 uplods/
 *.json
+uploads/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
