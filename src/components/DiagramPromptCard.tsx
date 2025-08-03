@@ -23,7 +23,7 @@ export default function DiagramPromptCard({ idx, file, prompt, onFileChange, onP
       <CardContent>
         <Stack spacing={2}>
           <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Typography variant="h6">Diagram {idx + 1}</Typography>
+            <Typography variant="h6">Question {idx + 1}</Typography>
             {idx > 0 && (
               <IconButton onClick={onDelete} aria-label="delete">
                 <DeleteIcon />
@@ -31,7 +31,7 @@ export default function DiagramPromptCard({ idx, file, prompt, onFileChange, onP
             )}
           </Stack>
           {file ? (
-            <img src={URL.createObjectURL(file)} alt={`diagram-${idx}`} style={{ maxWidth: '100%', maxHeight: 200 }} />
+            <img src={URL.createObjectURL(file)} alt={`question-${idx}`} style={{ maxWidth: '100%', maxHeight: 200 }} />
           ) : (
             <Button variant="contained" onClick={handleSelect}>Upload Image</Button>
           )}

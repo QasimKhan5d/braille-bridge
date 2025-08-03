@@ -1,5 +1,7 @@
+import config from '../config';
+
 export async function generateLessonPack(formData: FormData): Promise<Blob> {
-  const res = await fetch('http://localhost:8000/api/lesson-pack', {
+  const res = await fetch(`${config.API_BASE_URL}/api/lesson-pack`, {
     method: 'POST',
     body: formData,
   });

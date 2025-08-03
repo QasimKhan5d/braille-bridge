@@ -8,8 +8,8 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Iterable
 
-SRC_DIR = pathlib.Path("../data/text")
-DST_DIR = pathlib.Path("../data/plain")
+SRC_DIR = pathlib.Path("../../data/text")
+DST_DIR = pathlib.Path("../../data/plain")
 DST_DIR.mkdir(parents=True, exist_ok=True)
 
 WHITESPACE_RE = re.compile(r"\s+")

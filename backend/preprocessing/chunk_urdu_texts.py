@@ -7,8 +7,8 @@ import unicodedata
 from typing import List, Optional
 from tqdm import tqdm
 
-SRC_DIR = pathlib.Path("../data/plain")
-DST_DIR = pathlib.Path("../data/chunks")
+SRC_DIR = pathlib.Path("../../data/plain")
+DST_DIR = pathlib.Path("../../data/chunks")
 DST_DIR.mkdir(parents=True, exist_ok=True)
 
 MIN_CHARS = 30

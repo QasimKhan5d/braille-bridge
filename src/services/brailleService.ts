@@ -1,4 +1,6 @@
-const API_BASE_URL = 'http://localhost:8000';
+import config from '../config';
+
+const API_BASE_URL = config.API_BASE_URL;
 
 export interface BrailleProcessingResult {
   braille_text: string;

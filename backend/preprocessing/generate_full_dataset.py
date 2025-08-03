@@ -13,11 +13,11 @@ from preprocessing.braille_synthetic_photo import BraillePage, PhotoAug, _saniti
 # ---------------------------------------------------------------------------
 
 # Source data (unchanged)
-CHUNKS_DIR = pathlib.Path("../data/chunks")
-BRAILLE_DIR = pathlib.Path("../data/braille")
+CHUNKS_DIR = pathlib.Path("../../data/chunks")
+BRAILLE_DIR = pathlib.Path("../../data/braille")
 
 # Output dataset root following Ultralytics YOLO layout
-DATASET_ROOT = pathlib.Path("../data/braille_yolo_hd")
+DATASET_ROOT = pathlib.Path("../../data/braille_yolo_hd")
 TRAIN_IMAGES_DIR = DATASET_ROOT / "images" / "train"
 VAL_IMAGES_DIR = DATASET_ROOT / "images" / "val"
 TRAIN_LABELS_DIR = DATASET_ROOT / "labels" / "train"

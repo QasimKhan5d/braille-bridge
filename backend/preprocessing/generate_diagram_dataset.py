@@ -73,9 +73,9 @@ def main():
     parser = argparse.ArgumentParser(description='Generate structured dataset from science diagrams')
     parser.add_argument('--count', type=int, default=None, 
                        help='Number of images to process (default: process all)')
-    parser.add_argument('--images-dir', type=str, default='../data/ai2d/images',
+    parser.add_argument('--images-dir', type=str, default='../../data/ai2d/images',
                        help='Directory containing input images')
-    parser.add_argument('--output-dir', type=str, default='../data/science-diagram-json',
+    parser.add_argument('--output-dir', type=str, default='../../data/science-diagram-json',
                        help='Directory to save JSON analyses')
     parser.add_argument('--prompt-file', type=str, default='diagram2json.txt',
                        help='File containing the analysis prompt')

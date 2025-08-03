@@ -32,7 +32,7 @@ export default function Dropzone({ onFileAccepted }: DropzoneProps) {
     >
       <input {...getInputProps()} />
       <Typography>
-        {isDragActive ? 'Drop the diagram here...' : 'Drag & drop a diagram image, or click to select'}
+        {isDragActive ? 'Drop the question image here...' : 'Drag & drop a question image, or click to select'}
       </Typography>
     </Paper>
   );

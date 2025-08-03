@@ -28,12 +28,7 @@ export default function SubmissionsPage() {
   const assignmentColumns: GridColDef[] = [
     { field: 'id', headerName: 'ID', width: 80 },
     { field: 'title', headerName: 'Title', flex: 1 },
-    {
-      field: 'numDiagrams',
-      headerName: '# Diagrams',
-      width: 120,
-      valueGetter: (params) => params?.row?.diagrams?.length ?? 0,
-    },
+    { field: 'numQuestions', headerName: '# Questions', width: 120 },
   ];
 
   const submissionColumns: GridColDef[] = [
@@ -73,10 +68,14 @@ export default function SubmissionsPage() {
           Assignments
         </Typography>
         <DataGrid
-          rows={assignments}
+          rows={assignments.map(assignment => ({
+            ...assignment,
+            numQuestions: assignment.diagrams?.length ?? 0
+          }))}
           columns={assignmentColumns}
           pageSizeOptions={[5]}
           onRowClick={handleAssignmentClick}
+          loading={assignments.length === 0}
         />
       </Container>
     );

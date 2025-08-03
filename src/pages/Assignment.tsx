@@ -3,6 +3,7 @@ import { Container, Typography, Button, Stack, LinearProgress, Paper, TextField 
 import DiagramPromptCard from '../components/DiagramPromptCard';
 import { generateLessonPack } from '../services/lessonPackService';
 import { createAssignment } from '../services/assignmentService';
+import config from '../config';
 
 interface Item {
   file: File | null;
@@ -62,7 +63,7 @@ export default function AssignmentPage() {
     setLoading(true);
 
     // Open SSE connection to receive live backend logs
-    const es = new EventSource('http://localhost:8000/api/progress-stream');
+      const es = new EventSource(`${config.API_BASE_URL}/api/progress-stream`);
     es.onmessage = (ev) => {
       const evt = JSON.parse(ev.data);
       if (evt.status === 'finished') {
@@ -143,7 +144,7 @@ export default function AssignmentPage() {
             onDelete={() => removeItem(idx)}
           />
         ))}
-        <Button variant="outlined" onClick={addItem}>Add Diagram</Button>
+        <Button variant="outlined" onClick={addItem}>Add Question</Button>
         <Button variant="contained" disabled={loading} onClick={handleGenerate}>
           Generate Lesson Pack
         </Button>

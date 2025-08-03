@@ -8,8 +8,8 @@ from tqdm import tqdm
 import louis
 from utils.text_clean import clean_source
 
-SRC_DIR = pathlib.Path("../data/chunks")
-DST_DIR = pathlib.Path("../data/braille")
+SRC_DIR = pathlib.Path("../../data/chunks")
+DST_DIR = pathlib.Path("../../data/braille")
 DST_DIR.mkdir(parents=True, exist_ok=True)
 
 def to_braille(text):

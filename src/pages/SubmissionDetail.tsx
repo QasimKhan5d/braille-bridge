@@ -224,11 +224,11 @@ export default function SubmissionDetail() {
           {/* Original diagram & question */}
           <div>
             <Typography variant="h6" gutterBottom>
-              Original Diagram & Question
+              Original Question & Image
             </Typography>
             <img
               src={getFileUrl(diagram.image_path)}
-              alt="Original diagram"
+              alt="Original question"
               style={{ maxWidth: '100%', borderRadius: 8 }}
             />
             <Typography sx={{ mt: 1 }}>{diagram.prompt}</Typography>

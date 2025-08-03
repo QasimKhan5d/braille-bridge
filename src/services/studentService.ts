@@ -1,4 +1,6 @@
-const API_BASE_URL = 'http://localhost:8000';
+import config from '../config';
+
+const API_BASE_URL = config.API_BASE_URL;
 
 export async function analyzeFeedback(feedback: string, isCorrect: boolean, studentName: string): Promise<{ trait: string; type: string }> {
   const res = await fetch(`${API_BASE_URL}/api/feedback/analyze`, {
