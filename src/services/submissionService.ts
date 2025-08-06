@@ -56,8 +56,8 @@ export interface AutogradeResult {
   error_end?: number;
 }
 
-export async function autogradeSubmission(id: number): Promise<AutogradeResult> {
-  const res = await fetch(`${API_BASE_URL}/api/submissions/${id}/autograde`, {
+export async function autogradeSubmission(id: number, answerIndex: number = 0): Promise<AutogradeResult> {
+  const res = await fetch(`${API_BASE_URL}/api/submissions/${id}/autograde?answer_index=${answerIndex}`, {
     method: 'POST',
   });
   if (!res.ok) {

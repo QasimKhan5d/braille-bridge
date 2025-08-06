@@ -16,6 +16,7 @@ import FeedbackComposer from '../components/FeedbackComposer';
 import { translateUrduToEnglish } from '../services/brailleService';
 import { fetchSubmission, autogradeSubmission, AutogradeResult } from '../services/submissionService';
 import { analyzeFeedback } from '../services/studentService';
+import JSZip from 'jszip';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -59,6 +60,7 @@ export default function SubmissionDetail() {
   const [grading, setGrading] = useState(false);
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [customFeedback, setCustomFeedback] = useState('');
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   // -------------------------------------------------------------------------
   // Load submission details
@@ -81,8 +83,8 @@ export default function SubmissionDetail() {
   // Fallback translation if english_text missing
   // -------------------------------------------------------------------------
   useEffect(() => {
-    if (!data) return;
-    const answer = data.answers[0];
+    if (!data || !data.answers[currentQuestionIndex]) return;
+    const answer = data.answers[currentQuestionIndex];
     if (answer.english_text || !answer.urdu_text) return; // already translated or no urdu text
 
     setTranslating(true);
@@ -91,13 +93,13 @@ export default function SubmissionDetail() {
         setData((prev) => {
           if (!prev) return prev;
           const updated = { ...prev };
-          updated.answers[0].english_text = eng;
+          updated.answers[currentQuestionIndex].english_text = eng;
           return updated;
         });
       })
       .catch((e) => console.error('Translation failed', e))
       .finally(() => setTranslating(false));
-  }, [data]);
+  }, [data, currentQuestionIndex]);
 
   // -------------------------------------------------------------------------
   // Rendering helpers
@@ -118,7 +120,7 @@ export default function SubmissionDetail() {
     );
   }
 
-  const answer = data.answers[0];
+  const answer = data.answers[currentQuestionIndex];
   const diagram = data.assignment.diagrams[answer.diagram_idx];
 
   const downloadFeedback = async (feedback: string) => {
@@ -132,15 +134,10 @@ export default function SubmissionDetail() {
       }
     }
 
-    // Create feedback text file
+    // Prepare ZIP with feedback and (optionally) error SVG
     const content = `Submission #${id} - ${data.student}\n\nFeedback: ${feedback}\n\nBraille Text:\n${answer.braille_text || 'N/A'}\n\nUrdu Text:\n${answer.urdu_text}\n\nEnglish Text:\n${answer.english_text}`;
-    const textBlob = new Blob([content], { type: 'text/plain' });
-    const textUrl = URL.createObjectURL(textBlob);
-    const textLink = document.createElement('a');
-    textLink.href = textUrl;
-    textLink.download = `feedback_submission_${id}.txt`;
-    textLink.click();
-    URL.revokeObjectURL(textUrl);
+    const zip = new JSZip();
+    zip.file(`feedback_submission_${id}.txt`, content);
 
     // If there's braille text and error positions, generate SVG
     if (answer.braille_text && aiGrade && !aiGrade.correct && aiGrade.error_start !== undefined && aiGrade.error_end !== undefined) {
@@ -167,14 +164,17 @@ export default function SubmissionDetail() {
         </svg>
       `;
 
-      const svgBlob = new Blob([svgContent], { type: 'image/svg+xml' });
-      const svgUrl = URL.createObjectURL(svgBlob);
-      const svgLink = document.createElement('a');
-      svgLink.href = svgUrl;
-      svgLink.download = `braille_submission_${id}.svg`;
-      svgLink.click();
-      URL.revokeObjectURL(svgUrl);
+      zip.file(`braille_submission_${id}.svg`, svgContent);
     }
+
+    // Finalize and trigger download
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const zipUrl = URL.createObjectURL(zipBlob);
+    const zipLink = document.createElement('a');
+    zipLink.href = zipUrl;
+    zipLink.download = `submission_${id}_feedback.zip`;
+    zipLink.click();
+    URL.revokeObjectURL(zipUrl);
   };
 
   const highlightedUrdu = (answer.urdu_text || '')
@@ -214,6 +214,42 @@ export default function SubmissionDetail() {
       <Typography variant="h4" gutterBottom>
         Submission #{id} – {data.student}
       </Typography>
+      
+      {/* Question navigation */}
+      {data.answers.length > 1 && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+          <Button 
+            variant="outlined" 
+            size="small"
+            disabled={currentQuestionIndex === 0}
+            onClick={() => {
+              setCurrentQuestionIndex(prev => prev - 1);
+              setAiGrade(null); // Reset AI grade when changing questions
+              setShowFeedbackForm(false);
+              setCustomFeedback('');
+            }}
+          >
+            ← Previous
+          </Button>
+          <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
+            Question {currentQuestionIndex + 1} of {data.answers.length}
+          </Typography>
+          <Button 
+            variant="outlined" 
+            size="small"
+            disabled={currentQuestionIndex === data.answers.length - 1}
+            onClick={() => {
+              setCurrentQuestionIndex(prev => prev + 1);
+              setAiGrade(null); // Reset AI grade when changing questions
+              setShowFeedbackForm(false);
+              setCustomFeedback('');
+            }}
+          >
+            Next →
+          </Button>
+        </Box>
+      )}
+
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab label="Answer" />
         <Tab label="Feedback" />
@@ -302,7 +338,7 @@ export default function SubmissionDetail() {
               <Button variant="outlined" disabled={grading} onClick={async () => {
                 setGrading(true);
                 try {
-                  const grade = await autogradeSubmission(Number(id));
+                  const grade = await autogradeSubmission(Number(id), currentQuestionIndex);
                   setAiGrade(grade);
                 } catch (e) {
                   console.error(e);

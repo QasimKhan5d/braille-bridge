@@ -34,12 +34,7 @@ export default function SubmissionsPage() {
   const submissionColumns: GridColDef[] = [
     { field: 'id', headerName: 'ID', width: 70 },
     { field: 'student', headerName: 'Student', width: 140 },
-    {
-      field: 'type',
-      headerName: 'Type',
-      width: 100,
-      valueGetter: (params) => params?.row?.answers?.[0]?.answer_type ?? '',
-    },
+    { field: 'answer_type', headerName: 'Type', width: 120 },
   ];
 
   // ---------------------------------------------------------------------------
@@ -81,11 +76,21 @@ export default function SubmissionsPage() {
     );
   }
 
-  const gridRows = submissions.map((s) => ({
-    id: s.id,
-    student: s.student,
-    answers: s.answers,
-  }));
+  const gridRows = submissions.map((s) => {
+    // Get all unique answer types from all answers
+    const answerTypes = s.answers
+      ?.map(answer => answer.answer_type)
+      .filter((type, index, array) => type && array.indexOf(type) === index) // Remove duplicates and nulls
+      .map(type => type.charAt(0).toUpperCase() + type.slice(1)) // Capitalize
+      .sort(); // Sort for consistent ordering
+
+    return {
+      id: s.id,
+      student: s.student,
+      answers: s.answers,
+      answer_type: answerTypes?.length > 0 ? answerTypes.join(' & ') : '',
+    };
+  });
 
   return (
     <Container maxWidth="lg" sx={{ height: '80vh' }}>

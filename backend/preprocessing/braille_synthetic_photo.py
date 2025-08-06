@@ -363,7 +363,7 @@ class PhotoAug:
         return img
 
 if __name__ == "__main__":
-    urdu = "کیکٹس بہت سا پانی ذخیرہ کر سکتا ہے کیونکہ وہ سبز ہوتے ہیں۔"
+    urdu = "یہ زمین کے اندر واقع ہے۔"
     import louis
     lines = [louis.translateString(["ur-pk-g1.utb"], urdu)]
     # Normalise text the same way as dataset generation

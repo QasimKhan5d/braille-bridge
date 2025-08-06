@@ -69,7 +69,7 @@ async def load_gemma_audio_model():
         gemma_processor = None
         gemma_model = None
 
-async def process_audio_with_gemma(audio_path: str) -> tuple[str, str]:
+async def process_audio_with_gemma(audio_path: str, question: str = None) -> tuple[str, str]:
     """Process audio file and return (urdu_text, english_text)"""
     import librosa
     import soundfile as sf
@@ -110,7 +110,19 @@ async def process_audio_with_gemma(audio_path: str) -> tuple[str, str]:
     
     try:
         # Prepare instruction for Gemma
-        instruction = """Translate the following audio to both Urdu and English. Your response should be in the following format:
+        if question:
+            instruction = f"""This audio is a student's answer to the following question: "{question}"
+
+Translate the audio to both Urdu and English, keeping the question context in mind for accurate translation. Your response should be in the following format:
+```json
+{{
+    "english": "...",
+    "urdu": "..."
+}}
+```
+"""
+        else:
+            instruction = """Translate the following audio to both Urdu and English. Your response should be in the following format:
 ```json
 {
     "english": "...",
@@ -292,16 +304,20 @@ async def translate_urdu_to_english(payload: dict):
     from ollama import chat  # type: ignore
 
     text = payload.get("text", "").strip()
+    question = payload.get("question", "").strip()  # Optional question context
     if not text:
         raise HTTPException(status_code=400, detail="text required")
 
-    def _call_llm(urdu: str) -> str:
-        prompt = f"Translate the following Urdu text to English:\n\n{urdu}\n\nProvide only the translated English sentence(s) without additional commentary."
+    def _call_llm(urdu: str, question_context: str = "") -> str:
+        if question_context:
+            prompt = f"This is a student's answer to the question: '{question_context}'\n\nTranslate the following Urdu text to English, keeping the question context in mind:\n\n{urdu}\n\nProvide only the translated English sentence(s) without additional commentary. Do not include any text not mentioned in the student's answer."
+        else:
+            prompt = f"Translate the following Urdu text to English:\n\n{urdu}\n\nProvide only the translated English sentence(s) without additional commentary."
         response = chat(model="gemma3n:e2b", messages=[{"role": "user", "content": prompt}])
         return response.message.content.strip()
 
     try:
-        english_text: str = await asyncio.to_thread(_call_llm, text)
+        english_text: str = await asyncio.to_thread(_call_llm, text, question)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"translation error: {e}")
 
@@ -427,6 +443,10 @@ async def submit_assignment(
     with dest_path.open("wb") as out:
         out.write(await file.read())
 
+    # Get question context for better translation
+    diagram_meta = assignment["diagrams"][0]  # using diagram_idx 0 for now
+    question = diagram_meta["prompt"]
+
     # Process depending on type
     if answer_type == "image":
         if not reader:
@@ -437,7 +457,7 @@ async def submit_assignment(
         english_text = ""  # can translate later
     else:  # audio processing
         braille_text = None
-        urdu_text, english_text = await process_audio_with_gemma(str(dest_path))
+        urdu_text, english_text = await process_audio_with_gemma(str(dest_path), question)
 
     answers = [
         {
@@ -461,7 +481,7 @@ async def list_submissions():
 
 
 @app.post("/api/submissions/{submission_id}/autograde")
-async def autograde_submission(submission_id: int):
+async def autograde_submission(submission_id: int, answer_index: int = 0):
     sub = get_submission(submission_id)
     if not sub:
         raise HTTPException(status_code=404, detail="submission not found")
@@ -475,7 +495,11 @@ async def autograde_submission(submission_id: int):
         error_start: int | None = None
         error_end: int | None = None
 
-    ans = sub["answers"][0]
+    # Validate answer_index
+    if answer_index < 0 or answer_index >= len(sub["answers"]):
+        raise HTTPException(status_code=400, detail=f"Invalid answer_index {answer_index}. Submission has {len(sub['answers'])} answers.")
+
+    ans = sub["answers"][answer_index]
     assignment = get_assignment(sub["assignment_id"])
     diagram_meta = assignment["diagrams"][ans["diagram_idx"]]
     question = diagram_meta["prompt"]
@@ -526,6 +550,11 @@ async def get_submission_details(submission_id: int):
     if not sub:
         raise HTTPException(status_code=404, detail="submission not found")
 
+    # Get assignment context for translation
+    assignment = get_assignment(sub["assignment_id"])
+    if not assignment:
+        raise HTTPException(status_code=404, detail="assignment not found")
+
     updated_needed = False
 
     for ans in sub["answers"]:
@@ -545,6 +574,10 @@ async def get_submission_details(submission_id: int):
             ans["braille_text"] = "\n".join(braille_lines)
             raw_urdu = "\n".join(urdu_lines)
 
+            # Get the original question for context
+            diagram_meta = assignment["diagrams"][ans["diagram_idx"]]
+            question = diagram_meta["prompt"]
+
             # --- Validate & translate Urdu via Gemma ---
             from pydantic import BaseModel
             from ollama import chat
@@ -556,12 +589,15 @@ async def get_submission_details(submission_id: int):
             schema = UrduEnglishCorrection.model_json_schema()
             prompt = (
                 "The following Urdu text may contain OCR errors or mangled words. "
+                "This is a student's answer to a specific question. Use the question context to help correct and translate the text.\n\n"
+                f"Original Question: {question}\n\n"
                 "If the text is completely incoherent, just write N/A. "
                 "If it is just incoherent, rewrite it to be coherent while staying " 
-                "faithful to the student's original answer. "
+                "faithful to the student's original answer and considering the question context. "
                 "If it is both coherent and comprehensible, return the original text. "
-                "Then provide an English translation. Do not add any other text except the translations.\n\n"
-                f"Text:\n{raw_urdu}\n\n"
+                "Then provide an English translation that makes sense in the context of the question. "
+                "Do not add any other text except the translations.\n\n"
+                f"Student's Urdu Text:\n{raw_urdu}\n\n"
                 "Respond ONLY with a JSON object that matches this schema."
             )
             response = chat(model="gemma3n:e2b", messages=[{"role": "user", "content": prompt}], format=schema)
@@ -582,7 +618,12 @@ async def get_submission_details(submission_id: int):
             audio_path = Path(__file__).parent / file_path
             if not audio_path.exists():
                 continue
-            urdu_text, english_text = await process_audio_with_gemma(str(audio_path))
+            
+            # Get the original question for context
+            diagram_meta = assignment["diagrams"][ans["diagram_idx"]]
+            question = diagram_meta["prompt"]
+            
+            urdu_text, english_text = await process_audio_with_gemma(str(audio_path), question)
             ans["urdu_text"] = urdu_text
             ans["english_text"] = english_text
             ans["braille_text"] = None
