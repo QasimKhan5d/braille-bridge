@@ -15,7 +15,7 @@ from ollama import AsyncClient
 
 # --- Load heavy models at module import ------------------------------
 
-HF_MODEL_ID = "gemma-3N-finetune" 
+HF_MODEL_ID = "cookiefinder/gemma-3N-finetune" 
 TTS_SCRIPT = Path(__file__).parent / "tts_mlx.py"
 
 _hf_processor = AutoProcessor.from_pretrained(HF_MODEL_ID)
