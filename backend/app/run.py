@@ -19,4 +19,4 @@ if __name__ == "__main__":
     print(f"API Documentation: http://{host}:{port}/docs")
     print(f"Environment: {'Development' if reload else 'Production'}")
     
-    uvicorn.run("main:app", host=host, port=port, reload=reload) 
+    uvicorn.run("app.main:app", host=host, port=port, reload=reload) 

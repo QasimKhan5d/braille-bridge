@@ -1,25 +1,39 @@
 import json
 import tempfile
-from pathlib import Path
-from typing import List, Tuple
+import os
 import zipfile
 import shutil
+import asyncio
+from pathlib import Path
+from typing import List, Tuple
 
 import louis
 import logging
-import asyncio
 from fastapi import HTTPException
-
 from transformers import AutoProcessor, AutoModelForImageTextToText
 from ollama import AsyncClient
+
+# Import for lesson pack generation
+from app.services.progress_bus import push as emit_progress
+from app.db import set_diagram_context
+from app.services.tts_service import synthesize
 
 # --- Load heavy models at module import ------------------------------
 
 HF_MODEL_ID = "cookiefinder/gemma-3N-finetune" 
 TTS_SCRIPT = Path(__file__).parent / "tts_mlx.py"
 
-_hf_processor = AutoProcessor.from_pretrained(HF_MODEL_ID)
-_hf_model = AutoModelForImageTextToText.from_pretrained(HF_MODEL_ID)
+# Get Hugging Face token from environment
+hf_token = os.getenv("HUGGING_FACE_HUB_TOKEN")
+
+try:
+    _hf_processor = AutoProcessor.from_pretrained(HF_MODEL_ID, token=hf_token)
+    _hf_model = AutoModelForImageTextToText.from_pretrained(HF_MODEL_ID, token=hf_token)
+    print("Successfully loaded Hugging Face models")
+except Exception as e:
+    print(f"Failed to load Hugging Face models: {e}")
+    _hf_processor = None
+    _hf_model = None
 
 _ollama_client = AsyncClient()
 
@@ -36,7 +50,8 @@ async def _diagram_json_from_image(image_path: Path) -> dict:
     if not (_hf_model and _hf_processor):
         raise HTTPException(status_code=500, detail="HF diagram model not loaded")
     
-    instruction = Path("diagram2json.txt").read_text()
+    instruction = Path(__file__).parent.parent.parent / "prompts" / "diagram2json.txt"
+    instruction = instruction.read_text() if instruction.exists() else "Convert this diagram to JSON format."
     messages = [
         {
             "role": "user",
@@ -82,7 +97,8 @@ async def _english_and_urdu_scripts(diagram_json: dict) -> Tuple[str, str]:
         raise HTTPException(status_code=500, detail="Ollama client not available")
 
     json_str = json.dumps(diagram_json, ensure_ascii=False, indent=2)
-    script_prompt = Path( "json2script.txt").read_text()
+    script_prompt_path = Path(__file__).parent.parent.parent / "prompts" / "json2script.txt"
+    script_prompt = script_prompt_path.read_text() if script_prompt_path.exists() else "Convert this JSON to a script."
 
     english_prompt = f"{script_prompt}\n\nHere is the JSON:\n```json\n{json_str}\n```"
 
@@ -144,8 +160,6 @@ async def generate_lesson_pack(pairs: List[Tuple[Path, str]], assignment_id: int
 
     Logging at INFO level provides progress feedback in the server logs.
     """
-    from progress_bus import push as emit_progress
-
     total = len(pairs)
     emit_progress({"status": "starting", "total": total})
     logger.info("Starting lesson pack generation (%d items)", total)
@@ -168,7 +182,6 @@ async def generate_lesson_pack(pairs: List[Tuple[Path, str]], assignment_id: int
         logger.info("[%d/%d] Diagram JSON ready", idx, total)
         (item_dir / "diagram.json").write_text(json.dumps(diagram_json, ensure_ascii=False, indent=2))
         if assignment_id is not None:
-            from db import set_diagram_context
             set_diagram_context(assignment_id, idx - 1, json.dumps(diagram_json, ensure_ascii=False))
 
         logger.info("[%d/%d] Generating narration scripts", idx, len(pairs))
@@ -194,7 +207,6 @@ async def generate_lesson_pack(pairs: List[Tuple[Path, str]], assignment_id: int
         logger.info("[%d/%d] Generating English audio via TTS", idx, total)
         await asyncio.sleep(0)
         # Generate English audio via TTS service
-        from tts_service import synthesize 
         synthesize(eng_script, item_dir / "audio_en.wav")
 
     # Zip pack

@@ -8,7 +8,7 @@ import numpy as np
 import sphn
 
 # Reuse the shared loader from tts_mlx so we only pay model init cost once.
-from tts_mlx import load_tts_model
+from app.services.tts_mlx import load_tts_model
 
 # Lazily load the heavy model the first time this module is imported (or
 # explicitly via `preload_tts_model`).
