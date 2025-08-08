@@ -15,6 +15,12 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
+# Check if git is installed
+if ! command -v git &> /dev/null; then
+    echo "❌ Git is not installed. Please install Git first."
+    exit 1
+fi
+
 echo "✅ Prerequisites check passed"
 
 # Setup Backend
@@ -30,6 +36,28 @@ fi
 
 # Activate virtual environment
 source venv/bin/activate
+
+# Install liblouis library
+echo "Installing liblouis library..."
+if [ ! -d "liblouis" ]; then
+    echo "Cloning liblouis repository..."
+    git clone https://github.com/liblouis/liblouis.git
+fi
+
+cd liblouis
+echo "Configuring liblouis with UCS4 support..."
+./configure --enable-ucs4
+
+echo "Building liblouis..."
+make
+
+echo "Installing liblouis system-wide..."
+sudo make install
+
+echo "Installing liblouis Python bindings..."
+cd python
+python setup.py install
+cd ../..
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
