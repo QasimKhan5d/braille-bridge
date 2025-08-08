@@ -11,7 +11,7 @@ Run examples:
 from __future__ import annotations
 from pprint import pprint
 import argparse
-from backend.db import assignments_table, submissions_table, students_table, db, all_assignments, all_submissions, get_all_students
+from app.db import assignments_table, submissions_table, students_table, db, all_assignments, all_submissions, get_all_students
 
 parser = argparse.ArgumentParser(description="Clean TinyDB data")
 parser.add_argument("--assignment", type=int, help="Assignment ID to delete (also deletes its submissions)")

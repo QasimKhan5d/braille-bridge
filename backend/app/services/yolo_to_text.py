@@ -2,12 +2,11 @@
 # Convert YOLO detection results to Urdu text using the braille decoder
 
 from ultralytics import YOLO
-from braille_decoder import BrailleDecoder
+from app.services.braille_decoder import BrailleDecoder
 from typing import List, Tuple
 import pathlib
 from PIL import Image, ImageDraw, ImageFont
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 
 class YOLOBrailleReader:
     def __init__(self, model_path: str, confidence_threshold: float = 0.5, imgsz: int = 1280):

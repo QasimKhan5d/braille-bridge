@@ -1,28 +1,60 @@
-import logging
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-from fastapi.middleware.cors import CORSMiddleware
-import tempfile
-import os
+# Standard library imports
+import asyncio
 import json
+import logging
+import os
+import re
+import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple
+
+import librosa
 import louis
+import numpy as np
+import soundfile as sf
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from ollama import chat
+from pydantic import BaseModel
+
+load_dotenv()
+
+# Set Hugging Face token
+hf_token = os.getenv("HUGGING_FACE_HUB_TOKEN")
+if hf_token:
+    os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
-from lesson_pack_service import generate_lesson_pack
+from app.db import (
+    add_student_feedback,
+    all_assignments,
+    all_submissions,
+    db,
+    get_all_students,
+    get_assignment,
+    get_submission,
+    insert_assignment,
+    insert_submission,
+    submissions_table,
+)
+from app.services.lesson_pack_service import generate_lesson_pack
+from app.services.progress_bus import register_listener, remove_listener
+from app.services.yolo_to_text import YOLOBrailleReader
+from app.services.gemma_pipeline import preload_gemma_pipeline, process_audio_with_gemma
 
-from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    import tts_service
+    import app.services.tts_service as tts_service
+
     tts_service.preload_tts_model()
-    # Load Gemma audio processing model
-    await load_gemma_audio_model()
+    preload_gemma_pipeline()
     yield
-from yolo_to_text import YOLOBrailleReader
-import asyncio
 
 
 app = FastAPI(
@@ -44,140 +76,60 @@ app.add_middleware(
 )
 
 # Initialize YOLO reader
-model_path = Path(__file__).parent / "yolo11n.pt"
+model_path = Path(__file__).parent.parent / "models" / "yolo11n.pt"
 if not model_path.exists():
     print(f"Warning: Model not found at {model_path}")
     reader = None
 else:
     reader = YOLOBrailleReader(str(model_path), confidence_threshold=0.3)
 
-# Global variables for Gemma audio model
-gemma_processor = None
-gemma_model = None
 
-async def load_gemma_audio_model():
-    """Load Gemma audio processing model once at startup"""
-    global gemma_processor, gemma_model
-    try:
-        from transformers import AutoProcessor, AutoModelForImageTextToText
-        PRETRAINED_MODEL = "google/gemma-3n-E4B-it"
-        gemma_processor = AutoProcessor.from_pretrained(PRETRAINED_MODEL)
-        gemma_model = AutoModelForImageTextToText.from_pretrained(PRETRAINED_MODEL)
-        print("Gemma audio model loaded successfully")
-    except Exception as e:
-        print(f"Failed to load Gemma audio model: {e}")
-        gemma_processor = None
-        gemma_model = None
-
-async def process_audio_with_gemma(audio_path: str, question: str = None) -> tuple[str, str]:
-    """Process audio file and return (urdu_text, english_text)"""
-    import librosa
-    import soundfile as sf
-    import numpy as np
-    import tempfile
-    import json
+def preprocess_audio_for_gemma(audio_path: str) -> str:
+    """Preprocess audio file for Gemma pipeline processing.
     
-    if not gemma_processor or not gemma_model:
-        raise Exception("Gemma audio model not loaded")
-    
+    Parameters
+    ----------
+    audio_path : str
+        Path to the original audio file.
+        
+    Returns
+    -------
+    str
+        Path to the preprocessed audio file.
+    """
     # Preprocess audio (based on gemma_audio_processing.py)
     audio, sr = librosa.load(audio_path, sr=None)
-    
+
     # Convert to mono if stereo
     if len(audio.shape) > 1:
         audio = librosa.to_mono(audio)
-    
+
     # Resample to 16kHz if needed
     if sr != 16000:
         audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
         sr = 16000
-    
+
     # Limit duration to 30 seconds
     max_samples = int(sr * 30)
     if len(audio) > max_samples:
         audio = audio[:max_samples]
-    
+
     # Ensure float32 and normalize
     audio = audio.astype(np.float32)
     max_val = np.max(np.abs(audio))
     if max_val > 1.0:
         audio = audio / max_val
-    
+
     # Save to temporary file
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         sf.write(temp_file.name, audio, 16000, subtype="FLOAT")
-        temp_audio_path = temp_file.name
-    
-    try:
-        # Prepare instruction for Gemma
-        if question:
-            instruction = f"""This audio is a student's answer to the following question: "{question}"
+        return temp_file.name
 
-Translate the audio to both Urdu and English, keeping the question context in mind for accurate translation. Your response should be in the following format:
-```json
-{{
-    "english": "...",
-    "urdu": "..."
-}}
-```
-"""
-        else:
-            instruction = """Translate the following audio to both Urdu and English. Your response should be in the following format:
-```json
-{
-    "english": "...",
-    "urdu": "..."
-}
-```
-"""
-        
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "audio", "audio": temp_audio_path},
-                    {"type": "text", "text": instruction}
-                ]
-            }
-        ]
-        
-        inputs = gemma_processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt"
-        )
-        inputs = inputs.to(gemma_model.device, dtype=gemma_model.dtype)
-        
-        outputs = gemma_model.generate(**inputs, max_new_tokens=1024)
-        result = gemma_processor.decode(outputs[0][inputs["input_ids"].shape[-1]:])
-        
-        # Parse JSON response
-        try:
-            # Extract JSON from response
-            json_start = result.find("{")
-            json_end = result.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                json_str = result[json_start:json_end]
-                parsed = json.loads(json_str)
-                urdu_text = parsed.get("urdu", "").strip()
-                english_text = parsed.get("english", "").strip()
-                return urdu_text, english_text
-            else:
-                return "Audio processing failed", "Audio processing failed"
-        except json.JSONDecodeError:
-            return "Audio parsing failed", "Audio parsing failed"
-    
-    finally:
-        # Clean up temp file
-        import os
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
 
 @app.get("/")
 async def root():
     return {"message": "BrailleBridge Teacher API"}
+
 
 @app.post("/api/process-braille")
 async def process_braille_image(file: UploadFile = File(...)):
@@ -186,47 +138,45 @@ async def process_braille_image(file: UploadFile = File(...)):
     """
     if not reader:
         raise HTTPException(status_code=500, detail="YOLO model not loaded")
-    
+
     # Validate file type
-    if not file.content_type.startswith('image/'):
+    if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
-    
+
     try:
         # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
             content = await file.read()
             tmp_file.write(content)
             tmp_file_path = tmp_file.name
-        
+
         # Process image
         braille_lines, urdu_lines = reader.predict_and_decode(tmp_file_path)
-        
+
         # Clean up temp file
         os.unlink(tmp_file_path)
-        
+
         # Join lines
         braille_text = "\n".join(braille_lines)
         urdu_text = "\n".join(urdu_lines)
-        
+
         return {
             "braille_text": braille_text,
             "urdu_text": urdu_text,
             "braille_lines": braille_lines,
             "urdu_lines": urdu_lines,
-            "errors": []  # TODO: Implement error detection
+            "errors": [],  # TODO: Implement error detection
         }
-        
+
     except Exception as e:
         # Clean up temp file if it exists
-        if 'tmp_file_path' in locals():
+        if "tmp_file_path" in locals():
             try:
                 os.unlink(tmp_file_path)
             except:
                 pass
-        
-        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
-from progress_bus import register_listener, remove_listener  # after imports above
+        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
 
 @app.get("/api/progress-stream")
@@ -252,10 +202,10 @@ async def create_lesson_pack(
     files: List[UploadFile] = File(...),
     prompts: str = File(...),
     title: str = Form("lesson_pack"),
-    assignment_id: str | None = Form(None)
+    assignment_id: str | None = Form(None),
 ):
     """files: images, prompts: JSON list matching files order"""
-    
+
     prompt_list = json.loads(prompts)
     if len(prompt_list) != len(files):
         raise HTTPException(status_code=400, detail="files and prompts length mismatch")
@@ -272,7 +222,6 @@ async def create_lesson_pack(
 
     aid_int = int(assignment_id) if assignment_id and assignment_id.isdigit() else None
     zip_path = await generate_lesson_pack(saved_paths, aid_int)
-    import re
     safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title.strip()) or "lesson_pack"
     return FileResponse(zip_path, filename=f"{safe_title}.zip")
 
@@ -299,9 +248,6 @@ async def text_to_braille(payload: dict):
 @app.post("/api/translate-urdu-english")
 async def translate_urdu_to_english(payload: dict):
     """Translate provided Urdu text to English using a local LLM (Gemma3n via Ollama)."""
-    import asyncio
-    
-    from ollama import chat  # type: ignore
 
     text = payload.get("text", "").strip()
     question = payload.get("question", "").strip()  # Optional question context
@@ -313,7 +259,9 @@ async def translate_urdu_to_english(payload: dict):
             prompt = f"This is a student's answer to the question: '{question_context}'\n\nTranslate the following Urdu text to English, keeping the question context in mind:\n\n{urdu}\n\nProvide only the translated English sentence(s) without additional commentary. Do not include any text not mentioned in the student's answer."
         else:
             prompt = f"Translate the following Urdu text to English:\n\n{urdu}\n\nProvide only the translated English sentence(s) without additional commentary."
-        response = chat(model="gemma3n:e2b", messages=[{"role": "user", "content": prompt}])
+        response = chat(
+            model="gemma3n:e2b", messages=[{"role": "user", "content": prompt}]
+        )
         return response.message.content.strip()
 
     try:
@@ -322,6 +270,7 @@ async def translate_urdu_to_english(payload: dict):
         raise HTTPException(status_code=500, detail=f"translation error: {e}")
 
     return {"english_text": english_text}
+
 
 # Internal helper used by server-side functions
 async def translate_urdu_to_english_internal(text: str) -> str:
@@ -332,13 +281,13 @@ async def translate_urdu_to_english_internal(text: str) -> str:
 # ---------------------------------------------------------------------------
 # ASSIGNMENT CRUD
 # ---------------------------------------------------------------------------
-from db import insert_assignment, get_assignment, all_assignments, insert_submission, get_submission, all_submissions, submissions_table, db, add_student_feedback, get_all_students  # type: ignore
 
-UPLOADS_DIR = (Path(__file__).parent / "uploads").resolve()
-from fastapi.staticfiles import StaticFiles
+UPLOADS_DIR = (Path(__file__).parent.parent / "uploads").resolve()
+
 UPLOADS_DIR.mkdir(exist_ok=True)
 # Serve uploaded files statically so the frontend can access them
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+
 
 @app.post("/api/assignments")
 async def create_assignment(
@@ -364,7 +313,13 @@ async def create_assignment(
         dest_path = UPLOADS_DIR / filename
         with dest_path.open("wb") as out:
             out.write(await f.read())
-        diagrams_meta.append({"image_path": str(dest_path.relative_to(Path(__file__).parent)), "prompt": p, "context": ctx or p})
+        diagrams_meta.append(
+            {
+                "image_path": str(dest_path.relative_to(Path(__file__).parent.parent)),
+                "prompt": p,
+                "context": ctx or p,
+            }
+        )
 
     assignment_id = insert_assignment(title, diagrams_meta)
     return {"assignment_id": assignment_id}
@@ -402,7 +357,9 @@ async def create_external_submission(payload: dict):
     answers = payload.get("answers", [])
 
     if not assignment_id or not student or not answers:
-        raise HTTPException(status_code=400, detail="assignment_id, student, answers required")
+        raise HTTPException(
+            status_code=400, detail="assignment_id, student, answers required"
+        )
 
     # ensure assignment exists
     if not get_assignment(assignment_id):
@@ -411,7 +368,10 @@ async def create_external_submission(payload: dict):
     # validate answers minimal fields
     for a in answers:
         if not all(k in a for k in ("diagram_idx", "answer_type", "file_path")):
-            raise HTTPException(status_code=400, detail="answers must have diagram_idx, answer_type, file_path")
+            raise HTTPException(
+                status_code=400,
+                detail="answers must have diagram_idx, answer_type, file_path",
+            )
         a.setdefault("urdu_text", "")
         a.setdefault("english_text", "")
         a.setdefault("braille_text", None)
@@ -419,6 +379,7 @@ async def create_external_submission(payload: dict):
 
     sub_id = insert_submission(assignment_id, student, answers)
     return {"submission_id": sub_id}
+
 
 # ---------------------------------------------------------------------------
 # SUBMISSIONS
@@ -435,7 +396,9 @@ async def submit_assignment(
         raise HTTPException(status_code=404, detail="assignment not found")
 
     if answer_type not in ("image", "audio"):
-        raise HTTPException(status_code=400, detail="answer_type must be 'image' or 'audio'")
+        raise HTTPException(
+            status_code=400, detail="answer_type must be 'image' or 'audio'"
+        )
 
     # Save file
     dest_name = f"sub_{assignment_id}_{student}_{file.filename}"
@@ -457,17 +420,25 @@ async def submit_assignment(
         english_text = ""  # can translate later
     else:  # audio processing
         braille_text = None
-        urdu_text, english_text = await process_audio_with_gemma(str(dest_path), question)
+        # Preprocess audio for Gemma
+        preprocessed_audio_path = preprocess_audio_for_gemma(str(dest_path))
+        try:
+            urdu_text, english_text = await process_audio_with_gemma(
+                preprocessed_audio_path, question
+            )
+        finally:
+            # Clean up temp file
+            if os.path.exists(preprocessed_audio_path):
+                os.remove(preprocessed_audio_path)
 
     answers = [
         {
             "diagram_idx": 0,  # keep simple for now
             "answer_type": answer_type,
-            "file_path": str(dest_path.relative_to(Path(__file__).parent)),
+            "file_path": str(dest_path.relative_to(Path(__file__).parent.parent)),
             "urdu_text": urdu_text,
             "braille_text": braille_text,
             "english_text": english_text,
-            "errors": [],
         }
     ]
 
@@ -486,9 +457,6 @@ async def autograde_submission(submission_id: int, answer_index: int = 0):
     if not sub:
         raise HTTPException(status_code=404, detail="submission not found")
 
-    from pydantic import BaseModel
-    from ollama import chat  # type: ignore
-
     class GradeResult(BaseModel):
         correct: bool
         explanation: str
@@ -497,49 +465,56 @@ async def autograde_submission(submission_id: int, answer_index: int = 0):
 
     # Validate answer_index
     if answer_index < 0 or answer_index >= len(sub["answers"]):
-        raise HTTPException(status_code=400, detail=f"Invalid answer_index {answer_index}. Submission has {len(sub['answers'])} answers.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid answer_index {answer_index}. Submission has {len(sub['answers'])} answers.",
+        )
 
     ans = sub["answers"][answer_index]
     assignment = get_assignment(sub["assignment_id"])
     diagram_meta = assignment["diagrams"][ans["diagram_idx"]]
     question = diagram_meta["prompt"]
     diagram_json = diagram_meta["context"]
-    
+
     # Single LLM call for grading and error location
     is_image = ans["answer_type"] == "image"
-    
+
     if is_image:
         grade_prompt = (
-            "You are grading a student's answer. Use ONLY the diagram JSON as factual context."\
-            "\n\nQuestion: " + question + "\n\n"\
-            f"Diagram context (JSON):\n{diagram_json}\n\n"\
-            f"Student answer:\n{ans['english_text']}\n\n"\
-            f"Original Urdu text:\n{ans['urdu_text']}\n\n"\
-            "Respond with a JSON object containing:\n"\
-            "- 'correct' (boolean): whether the answer is correct\n"\
-            "- 'explanation' (string): 1-2 sentence explanation\n"\
-            "- 'error_start' (int or null): if incorrect, start character position of error in Urdu text\n"\
-            "- 'error_end' (int or null): if incorrect, end character position of error in Urdu text\n"\
+            "You are grading a student's answer. Use ONLY the diagram JSON as factual context."
+            "\n\nQuestion: " + question + "\n\n"
+            f"Diagram context (JSON):\n{diagram_json}\n\n"
+            f"Student answer:\n{ans['english_text']}\n\n"
+            f"Original Urdu text:\n{ans['urdu_text']}\n\n"
+            "Respond with a JSON object containing:\n"
+            "- 'correct' (boolean): whether the answer is correct\n"
+            "- 'explanation' (string): 1-2 sentence explanation\n"
+            "- 'error_start' (int or null): if incorrect, start character position of error in Urdu text\n"
+            "- 'error_end' (int or null): if incorrect, end character position of error in Urdu text\n"
             "For error positions, pinpoint the specific word or phrase rather than the entire sentence."
         )
     else:
         grade_prompt = (
-            "You are grading a student's answer. Use ONLY the diagram JSON as factual context."\
-            "\n\nQuestion: " + question + "\n\n"\
-            f"Diagram context (JSON):\n{diagram_json}\n\n"\
-            f"Student answer:\n{ans['english_text']}\n\n"\
+            "You are grading a student's answer. Use ONLY the diagram JSON as factual context."
+            "\n\nQuestion: " + question + "\n\n"
+            f"Diagram context (JSON):\n{diagram_json}\n\n"
+            f"Student answer:\n{ans['english_text']}\n\n"
             "Respond with a JSON object containing 'correct' (boolean) and 'explanation' (string)."
         )
-    
+
     grade_schema = GradeResult.model_json_schema()
-    grade_response = chat(model="gemma3n:e2b", messages=[{"role": "user", "content": grade_prompt}], format=grade_schema)
+    grade_response = chat(
+        model="gemma3n:e2b",
+        messages=[{"role": "user", "content": grade_prompt}],
+        format=grade_schema,
+    )
     grade_result = GradeResult.model_validate_json(grade_response.message.content)
-    
+
     return {
         "correct": grade_result.correct,
         "explanation": grade_result.explanation,
         "error_start": grade_result.error_start,
-        "error_end": grade_result.error_end
+        "error_end": grade_result.error_end,
     }
 
 
@@ -564,7 +539,7 @@ async def get_submission_details(submission_id: int):
         if ans["answer_type"] == "image":
             # Fix file path - remove 'backend/' prefix if present
             file_path = ans["file_path"].replace("backend/", "", 1)
-            img_path = Path(__file__).parent / file_path
+            img_path = Path(__file__).parent.parent / file_path
             if not img_path.exists():
                 continue  # can't process
             # Run YOLO OCR
@@ -579,9 +554,6 @@ async def get_submission_details(submission_id: int):
             question = diagram_meta["prompt"]
 
             # --- Validate & translate Urdu via Gemma ---
-            from pydantic import BaseModel
-            from ollama import chat
-
             class UrduEnglishCorrection(BaseModel):
                 urdu_text: str
                 english_text: str
@@ -592,7 +564,7 @@ async def get_submission_details(submission_id: int):
                 "This is a student's answer to a specific question. Use the question context to help correct and translate the text.\n\n"
                 f"Original Question: {question}\n\n"
                 "If the text is completely incoherent, just write N/A. "
-                "If it is just incoherent, rewrite it to be coherent while staying " 
+                "If it is just incoherent, rewrite it to be coherent while staying "
                 "faithful to the student's original answer and considering the question context. "
                 "If it is both coherent and comprehensible, return the original text. "
                 "Then provide an English translation that makes sense in the context of the question. "
@@ -600,7 +572,11 @@ async def get_submission_details(submission_id: int):
                 f"Student's Urdu Text:\n{raw_urdu}\n\n"
                 "Respond ONLY with a JSON object that matches this schema."
             )
-            response = chat(model="gemma3n:e2b", messages=[{"role": "user", "content": prompt}], format=schema)
+            response = chat(
+                model="gemma3n:e2b",
+                messages=[{"role": "user", "content": prompt}],
+                format=schema,
+            )
             content = response.message.content
             try:
                 parsed = UrduEnglishCorrection.model_validate_json(content)
@@ -615,15 +591,24 @@ async def get_submission_details(submission_id: int):
         else:  # audio processing
             # Fix file path - remove 'backend/' prefix if present
             file_path = ans["file_path"].replace("backend/", "", 1)
-            audio_path = Path(__file__).parent / file_path
+            audio_path = Path(__file__).parent.parent / file_path
             if not audio_path.exists():
                 continue
-            
+
             # Get the original question for context
             diagram_meta = assignment["diagrams"][ans["diagram_idx"]]
             question = diagram_meta["prompt"]
-            
-            urdu_text, english_text = await process_audio_with_gemma(str(audio_path), question)
+
+            # Preprocess audio for Gemma
+            preprocessed_audio_path = preprocess_audio_for_gemma(str(audio_path))
+            try:
+                urdu_text, english_text = await process_audio_with_gemma(
+                    preprocessed_audio_path, question
+                )
+            finally:
+                # Clean up temp file
+                if os.path.exists(preprocessed_audio_path):
+                    os.remove(preprocessed_audio_path)
             ans["urdu_text"] = urdu_text
             ans["english_text"] = english_text
             ans["braille_text"] = None
@@ -643,21 +628,21 @@ async def get_submission_details(submission_id: int):
 @app.post("/api/feedback/analyze")
 async def analyze_feedback_for_student(payload: dict):
     """Analyze feedback and generate strength/weakness for student profile"""
-    from pydantic import BaseModel
-    from ollama import chat  # type: ignore
-    
+
     class StudentFeedback(BaseModel):
         trait: str  # max 3 words describing strength or weakness
-    
+
     feedback_text = payload.get("feedback", "").strip()
     is_correct = payload.get("is_correct", False)
     student_name = payload.get("student_name", "").strip()
-    
+
     if not feedback_text or not student_name:
-        raise HTTPException(status_code=400, detail="feedback and student_name required")
-    
+        raise HTTPException(
+            status_code=400, detail="feedback and student_name required"
+        )
+
     trait_type = "strength" if is_correct else "weakness"
-    
+
     prompt = (
         f"Based on this teacher feedback about a student's answer, generate a single 1-3 word trait "
         f"that describes the student's {trait_type}. Use language a teacher would use in a student profile. "
@@ -665,15 +650,19 @@ async def analyze_feedback_for_student(payload: dict):
         f"Feedback: {feedback_text}\n\n"
         f"Respond with a JSON object containing 'trait' (1-3 words max)."
     )
-    
+
     schema = StudentFeedback.model_json_schema()
-    response = chat(model="gemma3n:e2b", messages=[{"role": "user", "content": prompt}], format=schema)
+    response = chat(
+        model="gemma3n:e2b",
+        messages=[{"role": "user", "content": prompt}],
+        format=schema,
+    )
     parsed = StudentFeedback.model_validate_json(response.message.content)
-    
+
     # Save to student profile
     feedback_type = "strength" if is_correct else "challenge"
     add_student_feedback(student_name, feedback_type, parsed.trait)
-    
+
     return {"trait": parsed.trait, "type": feedback_type}
 
 
@@ -687,6 +676,8 @@ async def get_students():
 async def health_check():
     return {"status": "healthy", "model_loaded": reader is not None}
 
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

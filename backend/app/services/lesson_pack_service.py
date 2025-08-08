@@ -1,25 +1,24 @@
 import json
 import tempfile
-from pathlib import Path
-from typing import List, Tuple
+import os
 import zipfile
 import shutil
+import asyncio
+from pathlib import Path
+from typing import List, Tuple
 
 import louis
 import logging
-import asyncio
 from fastapi import HTTPException
-
-from transformers import AutoProcessor, AutoModelForImageTextToText
 from ollama import AsyncClient
 
+# Import for lesson pack generation
+from app.services.progress_bus import push as emit_progress
+from app.db import set_diagram_context
+from app.services.tts_service import synthesize
+from app.services.gemma_pipeline import process_image_with_gemma
+
 # --- Load heavy models at module import ------------------------------
-
-HF_MODEL_ID = "cookiefinder/gemma-3N-finetune" 
-TTS_SCRIPT = Path(__file__).parent / "tts_mlx.py"
-
-_hf_processor = AutoProcessor.from_pretrained(HF_MODEL_ID)
-_hf_model = AutoModelForImageTextToText.from_pretrained(HF_MODEL_ID)
 
 _ollama_client = AsyncClient()
 
@@ -33,47 +32,21 @@ logger.setLevel(logging.INFO)
 # --------------------------------------------------------------------
 
 async def _diagram_json_from_image(image_path: Path) -> dict:
-    if not (_hf_model and _hf_processor):
-        raise HTTPException(status_code=500, detail="HF diagram model not loaded")
-    
-    instruction = Path("diagram2json.txt").read_text()
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "url": str(image_path)},
-                {"type": "text", "text": instruction},
-            ],
-        }
-    ]
-    # For simplicity, just call model.generate on captioning style
-    inputs = _hf_processor.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        tokenize=True,
-        return_dict=True,
-        return_tensors="pt",
-    ).to(_hf_model.device)
-
-    output_ids = _hf_model.generate(**inputs, max_new_tokens=2048)
-    raw = _hf_processor.decode(output_ids[0][inputs["input_ids"].shape[-1]:])
-
-    try:
-        # Remove any trailing special tokens (like <end_of_turn>) and whitespace before parsing
-        cleaned = raw.strip()
-        if cleaned.endswith("<end_of_turn>"):
-            cleaned = cleaned[: cleaned.rfind("<end_of_turn>")].strip()
-        # Optionally, try to extract the JSON block if it's surrounded by ```json ... ```
-        if "```json" in cleaned:
-            start = cleaned.find("```json") + len("```json")
-            end = cleaned.find("```", start)
-            if end != -1:
-                cleaned = cleaned[start:end].strip()
-        data = json.loads(cleaned)
-    except Exception:
-        print("Warning: Failed to parse JSON from model output")
-        print("Raw output:", raw)
-        data = {"raw": raw}
+    instruction = Path(__file__).parent.parent.parent / "prompts" / "diagram2json.txt"
+    instruction = instruction.read_text()
+    raw = await process_image_with_gemma(image_path, instruction)
+    # Remove any trailing special tokens (like <end_of_turn>) and whitespace before parsing
+    cleaned = raw.strip()
+    if cleaned.endswith("<end_of_turn>"):
+        cleaned = cleaned[: cleaned.rfind("<end_of_turn>")].strip()
+    # Optionally, try to extract the JSON block if it's surrounded by ```json ... ```
+    if "```json" in cleaned:
+        start = cleaned.find("```json") + len("```json")
+        end = cleaned.find("```", start)
+        if end != -1:
+            cleaned = cleaned[start:end].strip()
+    print(cleaned)
+    data = json.loads(cleaned)
     return data
 
 
@@ -82,7 +55,8 @@ async def _english_and_urdu_scripts(diagram_json: dict) -> Tuple[str, str]:
         raise HTTPException(status_code=500, detail="Ollama client not available")
 
     json_str = json.dumps(diagram_json, ensure_ascii=False, indent=2)
-    script_prompt = Path( "json2script.txt").read_text()
+    script_prompt_path = Path(__file__).parent.parent.parent / "prompts" / "json2script.txt"
+    script_prompt = script_prompt_path.read_text() if script_prompt_path.exists() else "Convert this JSON to a script."
 
     english_prompt = f"{script_prompt}\n\nHere is the JSON:\n```json\n{json_str}\n```"
 
@@ -144,8 +118,6 @@ async def generate_lesson_pack(pairs: List[Tuple[Path, str]], assignment_id: int
 
     Logging at INFO level provides progress feedback in the server logs.
     """
-    from progress_bus import push as emit_progress
-
     total = len(pairs)
     emit_progress({"status": "starting", "total": total})
     logger.info("Starting lesson pack generation (%d items)", total)
@@ -168,7 +140,6 @@ async def generate_lesson_pack(pairs: List[Tuple[Path, str]], assignment_id: int
         logger.info("[%d/%d] Diagram JSON ready", idx, total)
         (item_dir / "diagram.json").write_text(json.dumps(diagram_json, ensure_ascii=False, indent=2))
         if assignment_id is not None:
-            from db import set_diagram_context
             set_diagram_context(assignment_id, idx - 1, json.dumps(diagram_json, ensure_ascii=False))
 
         logger.info("[%d/%d] Generating narration scripts", idx, len(pairs))
@@ -194,7 +165,6 @@ async def generate_lesson_pack(pairs: List[Tuple[Path, str]], assignment_id: int
         logger.info("[%d/%d] Generating English audio via TTS", idx, total)
         await asyncio.sleep(0)
         # Generate English audio via TTS service
-        from tts_service import synthesize 
         synthesize(eng_script, item_dir / "audio_en.wav")
 
     # Zip pack

@@ -1,78 +1,148 @@
-# BrailleBridge Backend
+# Braille Bridge Backend
 
-A FastAPI-based backend service for processing braille images, managing assignments, and providing educational tools for braille learning.
+FastAPI backend for the Braille Bridge application, providing braille processing, audio generation, and educational management capabilities.
+
+## Project Structure
+
+```
+backend/
+├── app/                    # Main application code
+│   ├── main.py           # FastAPI application entry point
+│   ├── run.py            # Server runner
+│   ├── db.py             # Database configuration
+│   ├── routers/          # API route definitions
+│   ├── models/           # Data models
+│   ├── services/         # Business logic services
+│   └── utils/            # Utility functions
+├── models/               # AI/ML models
+│   └── yolo11n.pt       # YOLO model for object detection
+├── preprocessing/        # Data preprocessing scripts
+├── scripts/             # Utility scripts
+│   ├── insert_sample_submission.py
+│   └── cleanup_data.py
+├── docs/                # Documentation files
+│   ├── diagram2json.txt
+│   └── json2script.txt
+├── data/                # Sample data files
+├── uploads/             # File upload directory
+├── gemma-3N-finetune/   # Gemma model fine-tuning
+├── requirements.txt      # Python dependencies
+├── .env                 # Environment variables
+├── .env.example         # Environment template
+└── db.json             # SQLite database
+```
 
 ## Setup
 
-    source venv/bin/activate
-    pip install -r requirements.txt
-    pip install moshi-mlx
+1. **Install Dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### Setup louis (braille translator)
+2. **Environment Setup**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
 
-    cd liblouis-3.34.0
-    make uninstall          # optional, cleans previous install
-    make clean              # optional
-    ./configure --enable-ucs4 --prefix=/opt/homebrew
-    make
-    sudo make install
-    cd python && python setup.py install
+3. **Run the Server**
+   ```bash
+   python app/run.py
+   ```
 
-## Architecture
+## Text-to-Speech Configuration
 
-### Core Services
-- **FastAPI Server** (`main.py`) - REST API with CORS support for frontend integration
-- **Database Layer** (`db.py`) - TinyDB-based local storage for assignments, submissions, and student profiles
-- **YOLO Braille Reader** (`yolo_to_text.py`) - Computer vision pipeline for detecting and reading braille characters
-- **Braille Decoder** (`braille_decoder.py`) - Converts braille patterns to Urdu text using Louis library
-- **Lesson Pack Generator** (`lesson_pack_service.py`) - Creates educational content packages
+The application uses `pyttsx3` for text-to-speech synthesis, which provides:
 
-### AI/ML Components
-- **Gemma-3N Fine-tuned Model** - Custom model for image-to-text processing and diagram analysis
-- **YOLO11n** - Object detection model trained for braille character recognition
-- **TTS Services** (`tts_service.py`, `tts_mlx.py`) - Text-to-speech conversion for audio feedback
+### **pyttsx3 TTS**
+- Uses the system's built-in TTS engines
+- No heavy model loading required
+- Fast and lightweight
+- Supports multiple voices and languages
+- Cross-platform compatibility
 
-### Key Features
-- **Assignment Management** - Create, distribute, and grade braille assignments
-- **Auto-grading** - Automated evaluation of student submissions using AI
-- **Progress Tracking** - Real-time progress monitoring with server-sent events
-- **Student Analytics** - Feedback analysis and learning insights
-- **Multi-format Support** - Handles images, audio, and text content
+### **Features**
+- Automatic voice selection based on system availability
+- Configurable speech rate and volume
+- Support for multiple output formats (WAV, MP3, etc.)
+- No external model dependencies
+
+### **Voice Configuration**
+The TTS service automatically detects available voices on the system. You can specify a voice by name or ID:
+
+```python
+# Example usage
+synthesize("Hello world", "output.wav", voice="english")
+```
 
 ## API Endpoints
 
 ### Braille Processing
-- `POST /api/process-braille` - Convert braille images to text
-- `POST /api/text-to-braille` - Convert text to braille notation
+- `POST /braille/convert` - Convert text to braille
+- `POST /braille/decode` - Convert braille to text
 
-### Assignment Workflow
-- `POST /api/assignments` - Create new assignments
-- `GET /api/assignments` - List all assignments
-- `POST /api/assignments/{id}/submit` - Submit student work
-- `POST /api/submissions/{id}/autograde` - Grade submissions
+### Audio Processing
+- `POST /audio/generate` - Generate audio from text
+- `POST /audio/process` - Process audio files
 
-### Educational Tools
-- `POST /api/lesson-pack` - Generate lesson packages
-- `POST /api/feedback/analyze` - Analyze student performance
-- `GET /api/students` - Student profile management
+### Educational Management
+- `GET /students` - List all students
+- `POST /students` - Create new student
+- `GET /assignments` - List assignments
+- `POST /assignments` - Create assignment
+- `GET /submissions` - List submissions
+- `POST /submissions` - Submit assignment
 
-## Technical Stack
+### File Management
+- `POST /upload` - Upload files
+- `GET /files/{file_id}` - Download files
 
-- **Framework**: FastAPI with Uvicorn ASGI server
-- **Database**: TinyDB (JSON-based local storage)
-- **Computer Vision**: Ultralytics YOLO, PIL/Pillow
-- **AI/ML**: Transformers, Ollama, Gemma-3N
-- **Braille Processing**: Louis library (Urdu Grade-1)
-- **Audio**: TTS with MLX optimization
+## Development
 
-## Running the Server
-
+### Running in Development Mode
 ```bash
-python run.py
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Server starts on `http://localhost:8000` with auto-reload enabled.
+### Database
+The application uses SQLite for data storage. The database file is located at `db.json`.
+
+### Models
+- **YOLO Model**: Located in `models/yolo11n.pt` for object detection
+- **Gemma Models**: Fine-tuned models in `gemma-3N-finetune/`
+
+### Scripts
+Utility scripts are located in the `scripts/` directory:
+- `insert_sample_submission.py` - Insert sample data
+- `cleanup_data.py` - Clean up data files
+
+## Features
+
+- **Braille Conversion**: Text to braille and vice versa
+- **Audio Generation**: Text-to-speech using pyttsx3
+- **Object Detection**: YOLO-based diagram processing
+- **File Management**: Upload and download capabilities
+- **Student Management**: Track student progress
+- **Assignment System**: Create and manage educational content
 
 ## Dependencies
 
-Core dependencies include FastAPI, Ultralytics, Transformers, Louis, TinyDB, and various ML libraries. See `requirements.txt` for complete list.
+- FastAPI
+- SQLAlchemy
+- Pydantic
+- Uvicorn
+- PyTorch
+- Transformers
+- OpenCV
+- NumPy
+- Pandas
+- pyttsx3 (TTS library)
+
+## Environment Variables
+
+Create a `.env` file with the following variables:
+```
+DATABASE_URL=sqlite:///./db.json
+UPLOAD_DIR=./uploads
+MODEL_PATH=./models
+```
