@@ -63,6 +63,9 @@ __pycache__/
 # Ollama models (if using local models)
 .ollama/
 
+# Allow specific YOLO models
+!backend/models/yolo11n.pt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

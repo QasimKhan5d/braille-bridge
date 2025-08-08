@@ -1,3 +1,4 @@
+scripts/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -164,8 +165,7 @@ cython_debug/
 # VS Code
 .vscode/
 
-# Model files (can be large)
-*.pt
+# Model files (can be large) - but allow specific models
 *.pth
 *.onnx
 *.h5
@@ -173,6 +173,8 @@ cython_debug/
 *.pb
 *.tflite
 *.mlmodel
+# Allow specific YOLO models
+!yolo11n.pt
 
 # Data files
 *.csv
