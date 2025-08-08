@@ -28,7 +28,8 @@ braille-bridge/
 
 - Node.js (for frontend)
 - Python 3.8+ (for backend)
-- Git
+- Ollama
+
 
 ### Backend Setup
 
