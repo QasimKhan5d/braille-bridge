@@ -20,7 +20,6 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from ollama import chat
 from pydantic import BaseModel
-from transformers import AutoModelForImageTextToText, AutoProcessor
 
 load_dotenv()
 
@@ -46,6 +45,7 @@ from app.db import (
 from app.services.lesson_pack_service import generate_lesson_pack
 from app.services.progress_bus import register_listener, remove_listener
 from app.services.yolo_to_text import YOLOBrailleReader
+from app.services.gemma_pipeline import preload_gemma_pipeline, process_audio_with_gemma
 
 
 @asynccontextmanager
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
     import app.services.tts_service as tts_service
 
     tts_service.preload_tts_model()
-    await load_gemma_audio_model()
+    preload_gemma_pipeline()
     yield
 
 
@@ -83,28 +83,20 @@ if not model_path.exists():
 else:
     reader = YOLOBrailleReader(str(model_path), confidence_threshold=0.3)
 
-# Global variables for Gemma audio model
-gemma_processor = None
-gemma_model = None
 
-
-async def load_gemma_audio_model():
-    """Load Gemma audio processing model once at startup"""
-    global gemma_processor, gemma_model
-    PRETRAINED_MODEL = "google/gemma-3n-E4B-it"
-    gemma_processor = AutoProcessor.from_pretrained(PRETRAINED_MODEL)
-    gemma_model = AutoModelForImageTextToText.from_pretrained(PRETRAINED_MODEL)
-    print("Gemma audio model loaded successfully")
-
-
-async def process_audio_with_gemma(
-    audio_path: str, question: str = None
-) -> tuple[str, str]:
-    """Process audio file and return (urdu_text, english_text)"""
-
-    if not gemma_processor or not gemma_model:
-        raise Exception("Gemma audio model not loaded")
-
+def preprocess_audio_for_gemma(audio_path: str) -> str:
+    """Preprocess audio file for Gemma pipeline processing.
+    
+    Parameters
+    ----------
+    audio_path : str
+        Path to the original audio file.
+        
+    Returns
+    -------
+    str
+        Path to the preprocessed audio file.
+    """
     # Preprocess audio (based on gemma_audio_processing.py)
     audio, sr = librosa.load(audio_path, sr=None)
 
@@ -131,73 +123,7 @@ async def process_audio_with_gemma(
     # Save to temporary file
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         sf.write(temp_file.name, audio, 16000, subtype="FLOAT")
-        temp_audio_path = temp_file.name
-
-    try:
-        # Prepare instruction for Gemma
-        if question:
-            instruction = f"""This audio is a student's answer to the following question: "{question}"
-
-Translate the audio to both Urdu and English, keeping the question context in mind for accurate translation. Your response should be in the following format:
-```json
-{{
-    "english": "...",
-    "urdu": "..."
-}}
-```
-"""
-        else:
-            instruction = """Translate the following audio to both Urdu and English. Your response should be in the following format:
-```json
-{
-    "english": "...",
-    "urdu": "..."
-}
-```
-"""
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "audio", "audio": temp_audio_path},
-                    {"type": "text", "text": instruction},
-                ],
-            }
-        ]
-
-        inputs = gemma_processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        )
-        inputs = inputs.to(gemma_model.device, dtype=gemma_model.dtype)
-
-        outputs = gemma_model.generate(**inputs, max_new_tokens=1024)
-        result = gemma_processor.decode(outputs[0][inputs["input_ids"].shape[-1] :])
-
-        # Parse JSON response
-        try:
-            # Extract JSON from response
-            json_start = result.find("{")
-            json_end = result.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                json_str = result[json_start:json_end]
-                parsed = json.loads(json_str)
-                urdu_text = parsed.get("urdu", "").strip()
-                english_text = parsed.get("english", "").strip()
-                return urdu_text, english_text
-            else:
-                return "Audio processing failed", "Audio processing failed"
-        except json.JSONDecodeError:
-            return "Audio parsing failed", "Audio parsing failed"
-
-    finally:
-        # Clean up temp file
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
+        return temp_file.name
 
 
 @app.get("/")
@@ -494,9 +420,16 @@ async def submit_assignment(
         english_text = ""  # can translate later
     else:  # audio processing
         braille_text = None
-        urdu_text, english_text = await process_audio_with_gemma(
-            str(dest_path), question
-        )
+        # Preprocess audio for Gemma
+        preprocessed_audio_path = preprocess_audio_for_gemma(str(dest_path))
+        try:
+            urdu_text, english_text = await process_audio_with_gemma(
+                preprocessed_audio_path, question
+            )
+        finally:
+            # Clean up temp file
+            if os.path.exists(preprocessed_audio_path):
+                os.remove(preprocessed_audio_path)
 
     answers = [
         {
@@ -666,9 +599,16 @@ async def get_submission_details(submission_id: int):
             diagram_meta = assignment["diagrams"][ans["diagram_idx"]]
             question = diagram_meta["prompt"]
 
-            urdu_text, english_text = await process_audio_with_gemma(
-                str(audio_path), question
-            )
+            # Preprocess audio for Gemma
+            preprocessed_audio_path = preprocess_audio_for_gemma(str(audio_path))
+            try:
+                urdu_text, english_text = await process_audio_with_gemma(
+                    preprocessed_audio_path, question
+                )
+            finally:
+                # Clean up temp file
+                if os.path.exists(preprocessed_audio_path):
+                    os.remove(preprocessed_audio_path)
             ans["urdu_text"] = urdu_text
             ans["english_text"] = english_text
             ans["braille_text"] = None

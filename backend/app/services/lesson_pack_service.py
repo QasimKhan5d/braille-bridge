@@ -10,30 +10,15 @@ from typing import List, Tuple
 import louis
 import logging
 from fastapi import HTTPException
-from transformers import AutoProcessor, AutoModelForImageTextToText
 from ollama import AsyncClient
 
 # Import for lesson pack generation
 from app.services.progress_bus import push as emit_progress
 from app.db import set_diagram_context
 from app.services.tts_service import synthesize
+from app.services.gemma_pipeline import process_image_with_gemma
 
 # --- Load heavy models at module import ------------------------------
-
-HF_MODEL_ID = "cookiefinder/gemma-3N-finetune" 
-TTS_SCRIPT = Path(__file__).parent / "tts_mlx.py"
-
-# Get Hugging Face token from environment
-hf_token = os.getenv("HUGGING_FACE_HUB_TOKEN")
-
-try:
-    _hf_processor = AutoProcessor.from_pretrained(HF_MODEL_ID, token=hf_token)
-    _hf_model = AutoModelForImageTextToText.from_pretrained(HF_MODEL_ID, token=hf_token)
-    print("Successfully loaded Hugging Face models")
-except Exception as e:
-    print(f"Failed to load Hugging Face models: {e}")
-    _hf_processor = None
-    _hf_model = None
 
 _ollama_client = AsyncClient()
 
@@ -47,48 +32,21 @@ logger.setLevel(logging.INFO)
 # --------------------------------------------------------------------
 
 async def _diagram_json_from_image(image_path: Path) -> dict:
-    if not (_hf_model and _hf_processor):
-        raise HTTPException(status_code=500, detail="HF diagram model not loaded")
-    
     instruction = Path(__file__).parent.parent.parent / "prompts" / "diagram2json.txt"
-    instruction = instruction.read_text() if instruction.exists() else "Convert this diagram to JSON format."
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image", "url": str(image_path)},
-                {"type": "text", "text": instruction},
-            ],
-        }
-    ]
-    # For simplicity, just call model.generate on captioning style
-    inputs = _hf_processor.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        tokenize=True,
-        return_dict=True,
-        return_tensors="pt",
-    ).to(_hf_model.device)
-
-    output_ids = _hf_model.generate(**inputs, max_new_tokens=2048)
-    raw = _hf_processor.decode(output_ids[0][inputs["input_ids"].shape[-1]:])
-
-    try:
-        # Remove any trailing special tokens (like <end_of_turn>) and whitespace before parsing
-        cleaned = raw.strip()
-        if cleaned.endswith("<end_of_turn>"):
-            cleaned = cleaned[: cleaned.rfind("<end_of_turn>")].strip()
-        # Optionally, try to extract the JSON block if it's surrounded by ```json ... ```
-        if "```json" in cleaned:
-            start = cleaned.find("```json") + len("```json")
-            end = cleaned.find("```", start)
-            if end != -1:
-                cleaned = cleaned[start:end].strip()
-        data = json.loads(cleaned)
-    except Exception:
-        print("Warning: Failed to parse JSON from model output")
-        print("Raw output:", raw)
-        data = {"raw": raw}
+    instruction = instruction.read_text()
+    raw = await process_image_with_gemma(image_path, instruction)
+    # Remove any trailing special tokens (like <end_of_turn>) and whitespace before parsing
+    cleaned = raw.strip()
+    if cleaned.endswith("<end_of_turn>"):
+        cleaned = cleaned[: cleaned.rfind("<end_of_turn>")].strip()
+    # Optionally, try to extract the JSON block if it's surrounded by ```json ... ```
+    if "```json" in cleaned:
+        start = cleaned.find("```json") + len("```json")
+        end = cleaned.find("```", start)
+        if end != -1:
+            cleaned = cleaned[start:end].strip()
+    print(cleaned)
+    data = json.loads(cleaned)
     return data
 
 

@@ -50,6 +50,31 @@ backend/
    python app/run.py
    ```
 
+## Text-to-Speech Configuration
+
+The application uses `pyttsx3` for text-to-speech synthesis, which provides:
+
+### **pyttsx3 TTS**
+- Uses the system's built-in TTS engines
+- No heavy model loading required
+- Fast and lightweight
+- Supports multiple voices and languages
+- Cross-platform compatibility
+
+### **Features**
+- Automatic voice selection based on system availability
+- Configurable speech rate and volume
+- Support for multiple output formats (WAV, MP3, etc.)
+- No external model dependencies
+
+### **Voice Configuration**
+The TTS service automatically detects available voices on the system. You can specify a voice by name or ID:
+
+```python
+# Example usage
+synthesize("Hello world", "output.wav", voice="english")
+```
+
 ## API Endpoints
 
 ### Braille Processing
@@ -94,7 +119,7 @@ Utility scripts are located in the `scripts/` directory:
 ## Features
 
 - **Braille Conversion**: Text to braille and vice versa
-- **Audio Generation**: Text-to-speech using Gemma models
+- **Audio Generation**: Text-to-speech using pyttsx3
 - **Object Detection**: YOLO-based diagram processing
 - **File Management**: Upload and download capabilities
 - **Student Management**: Track student progress
@@ -111,6 +136,7 @@ Utility scripts are located in the `scripts/` directory:
 - OpenCV
 - NumPy
 - Pandas
+- pyttsx3 (TTS library)
 
 ## Environment Variables
 
