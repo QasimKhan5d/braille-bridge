@@ -52,6 +52,8 @@ This script will:
 5. Set up the frontend dependencies
 6. Create necessary configuration files
 
+Remember to fill the `.env` in `backend/`
+
 ### Manual Setup
 
 If you prefer to set up manually or the automated script fails, follow these steps:
