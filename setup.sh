@@ -23,6 +23,26 @@ fi
 
 echo "✅ Prerequisites check passed"
 
+# Install Ollama
+echo ""
+echo "🤖 Setting up Ollama..."
+if ! command -v ollama &> /dev/null; then
+    echo "Installing Ollama..."
+    curl -fsSL https://ollama.ai/install.sh | sh
+else
+    echo "✅ Ollama is already installed"
+fi
+
+# Start Ollama service
+echo "Starting Ollama service..."
+if pgrep -x "ollama" > /dev/null; then
+    echo "✅ Ollama service is already running"
+else
+    echo "Starting Ollama service..."
+    ollama serve &
+    sleep 3  # Give Ollama time to start
+fi
+
 # Setup Backend
 echo ""
 echo "🔧 Setting up Backend..."
@@ -89,5 +109,10 @@ echo ""
 echo "To start development:"
 echo "1. Backend: cd backend && source venv/bin/activate && python app/run.py"
 echo "2. Frontend: cd frontend && npm run dev"
+echo ""
+echo "Ollama service is running. You can manage it with:"
+echo "- Stop: ollama stop"
+echo "- Start: ollama serve"
+echo "- Status: ollama list"
 echo ""
 echo "For more information, see the README files in each directory."

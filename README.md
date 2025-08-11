@@ -32,9 +32,53 @@ braille-bridge/
 - Git (for cloning dependencies)
 - Ollama
 
-### Quick Setup
+### Docker Setup (Recommended)
 
-The easiest way to set up the project is using the automated setup script:
+The easiest way to run Braille Bridge is using Docker, which requires minimal setup:
+
+#### Using Docker Compose (Recommended)
+
+1. Make sure you have Docker and Docker Compose installed
+2. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd braille-bridge
+   ```
+
+3. Set up your environment file:
+   ```bash
+   cp backend/.env.example backend/.env
+   # Edit backend/.env with your configuration
+   ```
+
+4. Build and run with Docker Compose:
+   ```bash
+   docker-compose up --build
+   ```
+
+5. Access the application:
+   - Frontend: http://localhost:5173
+   - Backend API: http://localhost:8000
+   - Ollama: http://localhost:11434
+
+#### Using Docker directly
+
+1. Build the Docker image:
+   ```bash
+   docker build -t braille-bridge .
+   ```
+
+2. Run the container:
+   ```bash
+   docker run -p 5173:5173 -p 8000:8000 -p 11434:11434 \
+     -v $(pwd)/backend/uploads:/app/backend/uploads \
+     -v $(pwd)/backend/.env:/app/backend/.env \
+     braille-bridge
+   ```
+
+### Local Setup
+
+The easiest way to set up the project locally is using the automated setup script:
 
 ```bash
 # Make the setup script executable
@@ -46,11 +90,12 @@ chmod +x setup.sh
 
 This script will:
 1. Check for required prerequisites
-2. Set up the Python virtual environment
-3. Install liblouis library with UCS4 support
-4. Install all Python dependencies
-5. Set up the frontend dependencies
-6. Create necessary configuration files
+2. Install and start Ollama service
+3. Set up the Python virtual environment
+4. Install liblouis library with UCS4 support
+5. Install all Python dependencies
+6. Set up the frontend dependencies
+7. Create necessary configuration files
 
 Remember to fill the `.env` in `backend/`
 
